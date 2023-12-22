@@ -1,0 +1,98 @@
+---
+- hosts: all
+  gather_facts: False
+  tasks:
+  - name: install python3
+    raw: test -e /usr/bin/python3 || ( sudo /usr/bin/rpm-ostree install -y --apply-live --allow-inactive python3 libselinux-python3)
+  - name: Add IP address of all hosts to all hosts
+    lineinfile:
+      dest: /etc/hosts
+      regexp: '.*{{ item }}$'
+      line: "{{ hostvars[item].ansible_host }} {{item}}"
+      state: present
+    when: hostvars[item].ansible_host is defined
+    with_items: "{{ groups.all }}"
+  - name: Set hostname
+    hostname:
+     name: "{{ inventory_hostname }}"
+- hosts: all
+  tasks:
+    - name: Disable selinux (required reboot)
+      selinux:
+        state=disabled
+    - name: Install Install kubelet, kubectl, cri-o & cri-tools
+      community.general.rpm_ostree_pkg:
+        name:
+        - kubeadm
+        - kubelet
+        - kubectl
+        - cri-tools
+        - cri-o
+        state: present
+    - name: Reboot!
+      ansible.builtin.reboot:
+- hosts: all
+  tasks:
+    - name: Enable service kubelet
+      ansible.builtin.systemd_service:
+        name: kubelet
+        enabled: true
+    - name: Enable and start containerd
+      ansible.builtin.systemd_service:
+        name: crio
+        enabled: true
+        state: started
+- hosts: kcn
+  tasks:
+    - name: Copy clusterconfig
+      ansible.builtin.copy:
+        src: ./files/clusterconfig.yaml
+        dest: /root/clusterconfig.yaml
+        owner: root
+        group: root
+        mode: '0644'
+    - name: Reset K8s if needed
+      ansible.builtin.command: kubeadm reset -f
+    - name: Initialize K8s
+      ansible.builtin.command: kubeadm init --config /root/clusterconfig.yaml
+    - name: Get kubeadm join command with tokens
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: join_command
+    - name: Register flannel
+      shell: export KUBECONFIG=/etc/kubernetes/admin.conf && kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+    - name: set global join_command
+      delegate_to: localhost
+      delegate_facts: true
+      ansible.builtin.set_fact:
+        join_command: "{{ join_command.stdout }}"
+    - name: Print kubeadm join command with tokens
+      ansible.builtin.debug:
+        var: join_command
+    - name: Get /etc/kubernetes/admin.conf
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/admin.conf
+      register: kube_config
+    - name: Print kube_config
+      ansible.builtin.debug:
+        var: "{{ kube_config.content | b64decode }}"
+    - name: set global kube_config
+      delegate_to: localhost
+      delegate_facts: true
+      ansible.builtin.set_fact:
+        kube_config: "{{ kube_config }}"
+- hosts: kwn
+  tasks:
+    - name: Reset K8s if needed
+      ansible.builtin.command: kubeadm reset -f
+    - name: Execute kubeadm join
+      ansible.builtin.command: "{{ hostvars.localhost.join_command }}"
+      register: join_command_output
+    - name: Print kubeadm join output
+      ansible.builtin.debug:
+        var: join_command_output.stdout
+- hosts: all
+  tasks:
+    - name: Reboot!
+      ansible.builtin.reboot:
+    - name: Are we ready?
+      ansible.builtin.ping:

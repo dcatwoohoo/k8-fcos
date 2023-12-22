@@ -1,0 +1,44 @@
+variant: fcos
+version: 1.4.0
+passwd:
+  users:
+    - name: core
+      ssh_authorized_keys:
+        - ##KEYHERE##
+storage:
+  files:
+    # setting kernel parameters required by kubelet
+    - path: /etc/sysctl.d/90-kubernetes.conf
+      contents:
+        inline: |
+          # These are required for it to work properly
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward = 1
+
+          # This helps an issue later on when we get into running promtail
+          fs.inotify.max_user_instances = 256
+    # File Limits
+    - path: /etc/security/limits.d/90-kubernetes.conf
+      contents:
+        inline: |
+          # increase open files
+          * hard	nofile  10000
+
+    - path: /etc/modules-load.d/br_netfilter.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: br_netfilter
+    # YUM repository for kubeadm, kubelet and kubectl
+    - path: /etc/yum.repos.d/kubernetes.repo
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key
