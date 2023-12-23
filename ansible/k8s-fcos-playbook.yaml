@@ -37,7 +37,7 @@
       ansible.builtin.systemd_service:
         name: kubelet
         enabled: true
-    - name: Enable and start containerd
+    - name: Enable and start crio
       ansible.builtin.systemd_service:
         name: crio
         enabled: true
@@ -96,3 +96,13 @@
       ansible.builtin.reboot:
     - name: Are we ready?
       ansible.builtin.ping:
+- hosts: kcn
+  tasks:
+    - name: Git checkout
+      ansible.builtin.git:
+        repo: 'https://github.com/dcatwoohoo/k8-fcos-gitops.git'
+        dest: /tmp/k8-fcos-gitops
+    - name: Bootstrap flux
+      ansible.builtin.command:
+        cmd: ./bootstrap_cluster1.sh
+        chdir: /tmp/k8-fcos-gitops
